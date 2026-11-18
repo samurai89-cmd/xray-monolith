@@ -2,12 +2,12 @@
 #ifdef XR_DX12_BRIDGE
 #include "../Layers/xrRenderPC_R4/Dlss/FrameGeneration.h"
 
-// DirectX 12 Agility SDK 1.619.6 (bin\D3D12\D3D12Core.dll): Shader Model 6.6 for
+// DirectX 12 Agility SDK 1.620.2 (bin\D3D12\D3D12Core.dll): Shader Model 6.6 for
 // FSR 4 on Windows 10. If the OS runtime is newer or the folder is missing, the
 // system D3D12 runtime is used instead. Must be exported from the executable.
 extern "C"
 {
-__declspec(dllexport) extern const UINT D3D12SDKVersion = 619;
+__declspec(dllexport) extern const UINT D3D12SDKVersion = 620;
 __declspec(dllexport) extern const char* D3D12SDKPath = ".\\D3D12\\";
 }
 #endif

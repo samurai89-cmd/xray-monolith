@@ -19,8 +19,8 @@ bin/streamline/*.dll          sdk/Streamline/bin (Streamline 2.14.16, nvngx_dlss
                               NVIDIA-signed; 310.9.16 is required for DLSS-FG Preset C)
 bin/amd_fidelityfx_*_dx12.dll sdk/FidelityFX2/bin (FSR SDK 2.3.0: loader 2.3.0,
                               upscaler 4.1.1, frame generation 4.0.1; AMD-signed)
-bin/D3D12/D3D12Core.dll       sdk/AgilitySDK/bin (Agility SDK 1.619.6). The exe
-                              exports D3D12SDKVersion=619 / D3D12SDKPath=.\D3D12\.
+bin/D3D12/D3D12Core.dll       sdk/AgilitySDK/bin (Agility SDK 1.620.2). The exe
+                              exports D3D12SDKVersion=620 / D3D12SDKPath=.\D3D12\.
                               Gives Shader Model 6.6+ (FSR 4) on Windows 10.
 Licenses: sdk/FidelityFX2/LICENSE.md, sdk/AgilitySDK/LICENSE.txt,
 sdk/Streamline/LICENSE.txt. Only the files listed above are redistributable.
