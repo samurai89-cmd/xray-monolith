@@ -1,4 +1,5 @@
 #include "stdafx.h"
+#include "RenderDimensions.h"
 
 void CRenderTarget::phase_sunshafts()
 {
@@ -15,8 +16,8 @@ void CRenderTarget::phase_sunshafts()
 		Fvector2 uv0;
 	};
 
-	float _w = float(Device.dwWidth);
-	float _h = float(Device.dwHeight);
+	float _w = float(RenderScreenWidth());
+	float _h = float(RenderScreenHeight());
 	//float	ddw = 1.f / _w;
 	//float	ddh = 1.f / _h;
 	p0.set(.5f / _w, .5f / _h);
@@ -34,7 +35,12 @@ void CRenderTarget::phase_sunshafts()
 	In this pass generates geometry mask
 	*/
 	// Set RT's
+#if RENDER == R_R4
+	const bool maskOverTime = DlssSunshaftMaskOverTime();
+	u_setrt(maskOverTime ? rt_sunshafts_1 : rt_sunshafts_0, 0, 0, HW.pBaseZB);
+#else
 	u_setrt(rt_sunshafts_0, 0, 0, HW.pBaseZB);
+#endif
 	RCache.set_CullMode(CULL_NONE);
 	RCache.set_Stencil(FALSE);
 
@@ -58,6 +64,9 @@ void CRenderTarget::phase_sunshafts()
 	RCache.set_Element(s_sunshafts->E[0]);
 	RCache.set_Geometry(g_KD);
 	RCache.Render(D3DPT_TRIANGLELIST, Offset, 0, 4, 0, 2);
+#if RENDER == R_R4
+	if (maskOverTime) dlss_sunshaft_mask(Offset);
+#endif
 
 	//***FIRST PASS***
 	/*

@@ -15,6 +15,9 @@
 #include "flod.h"
 
 #include "../../xrEngine/xr_object.h"
+#if RENDER == R_R4
+#include "../xrRenderPC_R4/Dlss/DlssNativeUi.h"
+#endif
 
 using namespace R_dsgraph;
 
@@ -88,6 +91,59 @@ public:
 };
 }
 
+#ifdef USE_DX11
+// Previous-frame world matrix for dynamic visuals, keyed by the object's xform pointer.
+// Only the sky set m_w_prev before, so rigid dynamic meshes (props, items, doors)
+// built m_wvp_prev with an identity world and wrote garbage motion vectors.
+// Skinned meshes still override m_wvp_prev themselves in CSkeletonX::_Render.
+struct PrevWorldXform
+{
+	Fmatrix prev;
+	Fmatrix last;
+	u32 frame;
+};
+static xr_unordered_map<const Fmatrix*, PrevWorldXform> g_prev_world_xforms;
+
+static void set_dynamic_world_prev(const Fmatrix* M)
+{
+	if (!RImplementation.o.ssfx_motionvectors)
+		return;
+
+	const size_t count = g_prev_world_xforms.size();
+	PrevWorldXform& X = g_prev_world_xforms[M];
+	if (g_prev_world_xforms.size() != count)
+	{
+		X.prev = *M;
+		X.frame = Device.dwFrame;
+	}
+	else if (X.frame != Device.dwFrame)
+	{
+		// Not drawn last frame: no usable history, so assume no object motion
+		X.prev = (X.frame + 1 == Device.dwFrame) ? X.last : *M;
+		X.frame = Device.dwFrame;
+	}
+	X.last = *M;
+
+	RCache.set_xform_world_prev(X.prev);
+}
+
+static void prune_dynamic_world_prev()
+{
+	static u32 last_prune = 0;
+	if (Device.dwFrame - last_prune < 600)
+		return;
+	last_prune = Device.dwFrame;
+
+	for (auto it = g_prev_world_xforms.begin(); it != g_prev_world_xforms.end();)
+	{
+		if (Device.dwFrame - it->second.frame > 2)
+			it = g_prev_world_xforms.erase(it);
+		else
+			++it;
+	}
+}
+#endif
+
 template<typename T, bool Reverse>
 void CDSGraphManager::r_dsgraph_render_graph_sorted(R_dsgraph::mapDSGraphItems<T, Reverse>& graph, bool _clear)
 {
@@ -103,6 +159,9 @@ void CDSGraphManager::r_dsgraph_render_graph_sorted(R_dsgraph::mapDSGraphItems<T
 		RCache.set_Element(item.pSE);
 		CCustomFOVInitializer projection(item.fov);
 		RCache.set_xform_world(*item.pMatrix);
+#ifdef USE_DX11
+		set_dynamic_world_prev(item.pMatrix);
+#endif
 		RImplementation.apply_object(item.pObject);
 		RImplementation.apply_lmaterial();
 		//if (item.b_hud_mode)
@@ -116,11 +175,19 @@ void CDSGraphManager::r_dsgraph_render_graph_sorted(R_dsgraph::mapDSGraphItems<T
 		graph.clear();
 
 	RCache.set_xform_world(Fidentity);
+#ifdef USE_DX11
+	RCache.set_xform_world_prev(Fidentity);
+#endif
 }
 
 void CDSGraphManager::r_dsgraph_render_graph(RenderQueueArray& queues, u32 _priority, bool _clear, bool static_geometry)
 {
 	RCache.set_xform_world(Fidentity);
+#ifdef USE_DX11
+	RCache.set_xform_world_prev(Fidentity);
+	if (!static_geometry)
+		prune_dynamic_world_prev();
+#endif
 
 	for (u32 iPass = 0; iPass < SHADER_PASSES_MAX; ++iPass)
 	{
@@ -221,6 +288,9 @@ void CDSGraphManager::r_dsgraph_render_graph(RenderQueueArray& queues, u32 _prio
 			if (!static_geometry)
 			{
 				RCache.set_xform_world(*item.pMatrix);
+#ifdef USE_DX11
+				set_dynamic_world_prev(item.pMatrix);
+#endif
 				RImplementation.apply_object(item.pObject);
 				RImplementation.apply_lmaterial();
 			}
@@ -235,6 +305,11 @@ void CDSGraphManager::r_dsgraph_render_graph(RenderQueueArray& queues, u32 _prio
 		if (_clear)
 			queue.clear();
 	}
+
+#ifdef USE_DX11
+	if (!static_geometry)
+		RCache.set_xform_world_prev(Fidentity);
+#endif
 }
 
 //////////////////////////////////////////////////////////////////////////
@@ -344,11 +419,92 @@ void CDSGraphManager::r_dsgraph_render_ScopeSorted()  //  Redotix99: for 3D Shad
 }
 #endif
 
+#if RENDER == R_R4
+void CDSGraphManager::r_dsgraph_extract_native_ui()
+{
+	// Hold PDA screens and WearableDevices screen glass for the native pass.
+	// Attachment widgets draw directly through RenderActiveItemUI, outside these
+	// queues. Their glass must follow them instead of being baked into the scene.
+	RGraph.hasNativeHudAttachments = false;
+	dlss::ExtractNativeUi(RGraph.mapHUDSorted.Sorted, RGraph.mapHUDNativeUi, [this](const auto& item)
+	{
+		for (const auto& pass : item.pSE->passes)
+		{
+			if (!pass->T) continue;
+			for (const auto& texture : *pass->T)
+			{
+				if (!texture.second) continue;
+				if (texture.second->cName == "$user$ui") return true;
+				if (dlss::IsWearableScreenGlass(texture.second->cName.c_str()))
+				{
+					RGraph.hasNativeHudAttachments = true;
+					return true;
+				}
+			}
+		}
+		return false;
+	});
+	// Do not leave a second copy in an emissive or distortion scene pass.
+	dlss::RemoveNativeUiDuplicates(RGraph.mapHUDSorted.Emissive, RGraph.mapHUDNativeUi);
+	dlss::RemoveNativeUiDuplicates(RGraph.mapHUDSorted.Distort, RGraph.mapHUDNativeUi);
+}
+
+void CDSGraphManager::r_dsgraph_render_native_ui(bool renderHudUi)
+{
+	PROF_EVENT("r_dsgraph_render_native_ui");
+	// Draw widgets once, at display resolution with the unjittered HUD projection,
+	// before the sorted PDA/glass meshes, preserving the forward-pass ordering.
+	if (renderHudUi) r_dsgraph_render_hud_ui();
+	CHudInitializer initializer(true);
+	RImplementation.rmNear();
+	r_dsgraph_render_graph_sorted(RGraph.mapHUDNativeUi, true);
+	RImplementation.rmNormal();
+}
+
+void CDSGraphManager::r_dsgraph_extract_dlss_effects()
+{
+	// Laser beams are thin and bright, and follow the weapon without motion
+	// vectors of their own; reconstructed, they flickered. Hold them, on the
+	// weapon and on NPCs, for the pass after the upscaler.
+	const auto isLaser = [](const auto& item)
+	{
+		for (const auto& pass : item.pSE->passes)
+		{
+			const char* name = pass->ps ? pass->ps->cName.c_str() : nullptr;
+			if (name && !strncmp(name, "models_laserbeam", 16)) return true;
+		}
+		return false;
+	};
+	dlss::ExtractNativeUi(RGraph.mapHUDSorted.Sorted, RGraph.mapDlssHudEffects, isLaser);
+	auto& world = RGraph.mapDynamicSorted.Sorted;
+	world.erase(std::remove_if(world.begin(), world.end(), [&](const auto& item)
+	{
+		if (!isLaser(item)) return false;
+		RGraph.mapDlssEffects.push_back(item);
+		return true;
+	}), world.end());
+}
+
+void CDSGraphManager::r_dsgraph_render_dlss_effects()
+{
+	PROF_EVENT("r_dsgraph_render_dlss_effects");
+	r_dsgraph_render_graph_sorted(RGraph.mapDlssEffects, true);
+	if (RGraph.mapDlssHudEffects.empty()) return;
+	CHudInitializer initializer(true);
+	RImplementation.rmNear();
+	r_dsgraph_render_graph_sorted(RGraph.mapDlssHudEffects, true);
+	RImplementation.rmNormal();
+}
+#endif
+
 void CDSGraphManager::r_dsgraph_render_sorted_hud()
 {
 	PROF_EVENT("r_dsgraph_render_sorted_hud");
 #if	RENDER==R_R4
-	HW.pContext->CopyResource(RImplementation.Target->rt_Accumulator->pSurface, RImplementation.Target->rt_Generic_0->pSurface);
+	// With an 8-bit scene the formats differ and the copy does nothing. Keep it so
+	// when the scene is held in floating point for the upscaler.
+	if (!RImplementation.Target->dlss_hdr_swapped)
+		HW.pContext->CopyResource(RImplementation.Target->rt_Accumulator->pSurface, RImplementation.Target->rt_Generic_0->pSurface);
 #endif
 	CHudInitializer initializer(true);
 

@@ -261,10 +261,16 @@ namespace R_dsgraph
 		mapSorted<float, true, false, false, false> mapCamAttachedSorted;
 		mapDSGraphItems<float, false> mapWater;
 #ifdef USE_DX11
+		// PDA screens and wearable screen glass held outside the temporal scene.
+		mapDSGraphItems<float, true> mapHUDNativeUi;
+		bool hasNativeHudAttachments = false;
 		mapDSGraphItems<float, true> mapScopeHUDSorted;
 		mapDSGraphItems<float, false> mapScopeHUD;
 		mapDSGraphItems<float, false> mapScopeCamAttached;
 		mapDSGraphItems<float, false> mapScopeCamAttachedSorted;
+		// Particles and laser beams drawn after the upscaler, with the post chain.
+		mapDSGraphItems<float, true> mapDlssEffects;
+		mapDSGraphItems<float, true> mapDlssHudEffects;
 #endif
 		template<bool free = true>
 		IC void clear_graph(RenderQueueArray& queue, u32 _priority)
@@ -291,6 +297,9 @@ namespace R_dsgraph
 				mapDynamicSorted.Emissive.clear_and_free();
 				mapDynamicSorted.Sorted.clear_and_free();
 				mapDynamicSorted.Distort.clear_and_free();
+#ifdef USE_DX11
+				mapDlssEffects.clear_and_free();
+#endif
 			}
 			else
 			{
@@ -298,6 +307,9 @@ namespace R_dsgraph
 				mapDynamicSorted.Emissive.clear();
 				mapDynamicSorted.Sorted.clear();
 				mapDynamicSorted.Distort.clear();
+#ifdef USE_DX11
+				mapDlssEffects.clear();
+#endif
 			}
 		}
 
@@ -326,6 +338,9 @@ namespace R_dsgraph
 		template<bool free = true>
 		IC void clear_hud()
 		{
+#ifdef USE_DX11
+			hasNativeHudAttachments = false;
+#endif
 			if constexpr (free)
 			{
 				mapUI3D.clear_and_free();
@@ -350,6 +365,8 @@ namespace R_dsgraph
 #ifdef USE_DX11
 				mapScopeCamAttached.clear_and_free();
 				mapScopeCamAttachedSorted.clear_and_free();
+				mapHUDNativeUi.clear_and_free();
+				mapDlssHudEffects.clear_and_free();
 				mapScopeHUD.clear_and_free();
 				mapScopeHUDSorted.clear_and_free();
 #endif
@@ -378,6 +395,8 @@ namespace R_dsgraph
 #ifdef USE_DX11
 				mapScopeCamAttached.clear();
 				mapScopeCamAttachedSorted.clear();
+				mapHUDNativeUi.clear();
+				mapDlssHudEffects.clear();
 				mapScopeHUD.clear();
 				mapScopeHUDSorted.clear();
 #endif
