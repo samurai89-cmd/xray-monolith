@@ -210,7 +210,10 @@ void CRender::Render()
 		Target->phase_scene_begin();
 		GMBase.r_dsgraph_capture_hud();
 		if (dlss::Configured()) GMBase.r_dsgraph_extract_native_ui();
-		if (Target->DlssPostAfterUpscale()) GMBase.r_dsgraph_extract_dlss_effects();
+		if (Target->DlssEffectsAfterUpscale()) GMBase.r_dsgraph_extract_dlss_effects();
+#ifdef XR_DX12_BRIDGE
+		if (Target->FgMaskWanted()) GMBase.r_dsgraph_extract_fg_reticles();
+#endif
 		GMBase.r_dsgraph_render_hud();
 		GMBase.r_dsgraph_render_lods(true,true);
 		if (Details) Details->Render();
@@ -457,7 +460,7 @@ void CRender::render_forward()
 		CParticlesAsync::Wait();
 		GMBase.r_dsgraph_render_dynamic(1);
 		// Effects held for after the upscaler, if this frame is not reconstructed after all
-		if (!Target->DlssPostAfterUpscale())
+		if (!Target->DlssEffectsAfterUpscale())
 			GMBase.r_dsgraph_render_dlss_effects();
 		GMBase.fade_render(); // faded-portals
 		GMBase.r_dsgraph_render_sorted(false); // strict-sorted geoms

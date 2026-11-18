@@ -9,9 +9,11 @@ These overrides have new engine constants and must not be used with stock bins.
 Audited enabled loose-file providers in G.A.M.M.A. Co-op, 2026-10-07:
   190- Screen Space Shaders 23 - Ascii1457:
     screenspace_mvectors.h, deffer_grass.vs, combine_volumetric.ps (beam noise
-    moves every frame while upscaling, else unchanged)
+    moves every frame while upscaling before reconstruction; after it, the buffer
+    is sampled unjittered and the noise stays fixed; else unchanged),
+    vert.vs (upscaler jitter for blended alpha surfaces)
   Base game:
-    particle.vs, particle-clip.vs (upscaler jitter)
+    particle.vs, particle-clip.vs, lmape.vs (upscaler jitter)
   Atmospherics 2.69 RC7.5:
     deffer_impl_flat.ps
   (Since 0.63 no ssfx_* shader is overridden; SSS / Atmospherics use their own.)
@@ -22,7 +24,8 @@ Audited enabled loose-file providers in G.A.M.M.A. Co-op, 2026-10-07:
   New integration files:
     dlss_contract.h, dlss_copy.ps, dlss_cas.h, dlss_sharpen.ps, dlss_ui_depth.ps
     dlss_display_copy.ps, dlss_sunshaft_mask.ps, dlss_hdr.h, dlss_hdr_encode.ps,
-    dlss_hdr_decode.ps, dlss_debug_mv.ps
+    dlss_hdr_decode.ps, dlss_debug_mv.ps, dlss_volumetric_history.ps,
+    dlss_fg_hudless_test.ps, dlss_fg_laser_fill.ps
     scripts/modxml_dlss_options.script
     configs/text/eng/st_monolith_dlss.xml
 
@@ -48,7 +51,7 @@ renderer. It filters reconstructed DLSS/DLAA/FSR3 color before display overlays/
 inside the existing resolve draw. Atmospherics clarity/NV effects are unchanged.
 The UI hook is additive; it does not replace GAMMA's ui_options.script.
 English strings also provide the engine's localization fallback.
-Use NVIDIA's release nvngx_dlss.dll 310.9.1 beside AnomalyDX11.exe; source and
+Use NVIDIA's release nvngx_dlss.dll 310.9.16 beside AnomalyDX11.exe; source and
 checksum are recorded in tools/dlss/README.txt. No Frame Generation is included.
 
 Changes: non-jittered MV convention retained; bounded homogeneous division;

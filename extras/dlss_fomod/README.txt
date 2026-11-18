@@ -1,15 +1,15 @@
-DLSS / FSR3 COMPATIBILITY PATCH - 0.7
+NATIVE UPSCALING BINARIES COMPATIBILITY PATCH - 0.721
 https://github.com/brodrigz/xray-monolith
 
 INSTALL
 -------
-1. Install the 0.7 DLSS / FSR3 binaries using that release's instructions.
+1. Install Native Upscaling Binaries 0.72 using that release's instructions.
 2. Install and enable SSS 23.5 with GAMMA's recommended options.
 3. Install this ZIP through MO2:
    - Page 1: leave the required SSS 23.5 option checked.
    - Page 2: choose your installed Atmospherics version, or None.
-     RC7.5 to RC7.71 share one choice, whatever AO / IL / SSR options you
-     picked in the Atmospherics installer.
+     RC7.5 to RC7.71 share the RC7 choice and RC8 has its own, whatever
+     options you picked in the Atmospherics installer.
    - Page 3: select only the add-ons you have installed.
 4. Enable this patch BELOW SSS, Atmospherics and any other shader mods
    in MO2's left pane.
@@ -36,18 +36,28 @@ Better Beef's NVGs (.19):
   Put its patches below its main files, and this compatibility patch last.
   Clear the shader cache through the launcher after changing NVG mods.
 
-Glossy Puddles Overhaul v2.3 (Erandis, v2.2 also works):
+Glossy Puddles Overhaul v2.5 (Erandis):
   Select only if the original mod is installed and enabled.
+  Requires Glossy Puddles v2.5; with older versions the game fails to
+  compile shaders. Update Glossy Puddles first.
   The patch picks the matching version from your Atmospherics choice:
-    Atmospherics RC7.x -> Glossy Puddles "PBR Shader Based Weathers"
-    anything else      -> Glossy Puddles "SSS Based Weathers"
+    Atmospherics RC7 or RC8 -> Glossy Puddles "PBR Shader Based Weathers"
+    anything else           -> Glossy Puddles "SSS Based Weathers"
   Put Glossy Puddles above this compatibility patch in MO2's left pane.
+
+Atmospherics RC8 hotfix 4 is supported; earlier RC8 builds still work.
+
+WHAT'S NEW IN 0.721
+-------------------
+Uses the same 0.72 binaries; only this compatibility patch changed.
+- Glossy Puddles v2.5: its new footstep ripples now show on flat ground.
+- Better Beef's + Atmospherics RC8: keeps hotfix 4's new bloom blending.
 
 UPDATING OR CHANGING OPTIONS
 ---------------------------
 Reinstall this patch when changing Atmospherics or any optional add-on.
 Choose REPLACE in MO2 so files from your old selections are removed.
-Keep only one DLSS / FSR3 compatibility patch enabled.
+Keep only one Native Upscaling Binaries compatibility patch enabled.
 
 CUSTOM SSS INSTALLATION ONLY
 ---------------------------

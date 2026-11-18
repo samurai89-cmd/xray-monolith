@@ -167,7 +167,6 @@ void CRenderTarget::phase_dlss_scope(float jitterX, float jitterY)
 	if (!rt_dlss_scope_color)
 	{
 		rt_dlss_scope_color.create("$user$dlss_scope_color", w, h, D3DFMT_A16B16G16R16F);
-		rt_dlss_scope_position.create("$user$dlss_scope_position", w, h, D3DFMT_A16B16G16R16F);
 		rt_dlss_scope_heat.create("$user$dlss_scope_heat", w, h, D3DFMT_A8R8G8B8);
 	}
 	if (!reported_native_scope)
@@ -181,6 +180,7 @@ void CRenderTarget::phase_dlss_scope(float jitterX, float jitterY)
 	HW.pContext->CopyResource(rt_dlss_scope_color->pSurface, rt_dlss_post_source->pSurface);
 
 	// Thermal/night modes Load positions and heat at display pixel coordinates.
+	dlss_display_position(jitterX, jitterY);
 	const float fw = float(w), fh = float(h);
 	u32 offset;
 	FVF::TL* quad = (FVF::TL*)RCache.Vertex.Lock(4, g_combine->vb_stride, offset);
@@ -189,26 +189,19 @@ void CRenderTarget::phase_dlss_scope(float jitterX, float jitterY)
 	quad[2].set(fw, fh, EPS_S, 1, 0xffffffff, 1, 1);
 	quad[3].set(fw, 0, EPS_S, 1, 0xffffffff, 1, 0);
 	RCache.Vertex.Unlock(4, g_combine->vb_stride);
-	RCache.set_CullMode(CULL_NONE);
-	RCache.set_Stencil(FALSE);
-	RCache.set_ColorWriteEnable();
-	const ref_rt* copies[] = {&rt_dlss_scope_position, &rt_dlss_scope_heat};
-	for (u32 i = 0; i < 2; ++i)
-	{
-		u_setrt(*copies[i], nullptr, nullptr, nullptr);
-		RCache.set_Geometry(g_combine);
-		RCache.set_Element(s_dlss_display_copy->E[i]);
-		RCache.set_c("dlss_display_copy_params", float(dlss::RenderWidth()) / fw,
-			float(dlss::RenderHeight()) / fh, jitterX, jitterY);
-		RCache.Render(D3DPT_TRIANGLELIST, offset, 0, 4, 0, 2);
-	}
+	u_setrt(rt_dlss_scope_heat, nullptr, nullptr, nullptr);
+	RCache.set_Geometry(g_combine);
+	RCache.set_Element(s_dlss_display_copy->E[1]);
+	RCache.set_c("dlss_display_copy_params", float(dlss::RenderWidth()) / fw,
+		float(dlss::RenderHeight()) / fh, jitterX, jitterY);
+	RCache.Render(D3DPT_TRIANGLELIST, offset, 0, 4, 0, 2);
 
 	phase_dlss_native_depth(jitterX, jitterY, true);
 	// Reticles mark stencil 254 and cutouts test it.
 	HW.pContext->ClearDepthStencilView(HW.pBaseZB, D3D_CLEAR_STENCIL, 1.f, 0);
 
 	CTexture* inputs[] = {&*rt_Generic_temp->pTexture, &*rt_Generic_2->pTexture, &*rt_Heat->pTexture};
-	ID3DBaseTexture* sources[] = {rt_dlss_scope_color->pSurface, rt_dlss_scope_position->pSurface,
+	ID3DBaseTexture* sources[] = {rt_dlss_scope_color->pSurface, rt_dlss_display_position->pSurface,
 		rt_dlss_scope_heat->pSurface};
 	ID3DBaseTexture* saved[3];
 	for (u32 i = 0; i < 3; ++i)
@@ -218,6 +211,12 @@ void CRenderTarget::phase_dlss_scope(float jitterX, float jitterY)
 	}
 	RCache.InvalidateTextures();
 
+#ifdef XR_DX12_BRIDGE
+	// Reflex sight reticles over black, for frame generation's HUD-less image.
+	// Not the lenses: they magnify the frame.
+	if (fg_mask_begin())
+		RImplementation.GMBase.r_dsgraph_render_fg_mask(true);
+#endif
 	u_setrt(rt_dlss_post_source, nullptr, nullptr, HW.pBaseZB);
 	RCache.set_CullMode(CULL_CCW);
 	RCache.set_Stencil(FALSE);
@@ -230,6 +229,32 @@ void CRenderTarget::phase_dlss_scope(float jitterX, float jitterY)
 		_RELEASE(saved[i]);
 	}
 	RCache.InvalidateTextures();
+}
+
+// Scene positions resampled to display pixels, for passes after reconstruction
+// that Load them by pixel coordinate.
+void CRenderTarget::dlss_display_position(float jitterX, float jitterY)
+{
+	const float w = float(Device.dwWidth), h = float(Device.dwHeight);
+	if (!rt_dlss_display_position)
+		rt_dlss_display_position.create("$user$dlss_display_position", Device.dwWidth, Device.dwHeight,
+			D3DFMT_A16B16G16R16F);
+	u32 offset;
+	FVF::TL* quad = (FVF::TL*)RCache.Vertex.Lock(4, g_combine->vb_stride, offset);
+	quad[0].set(0, h, EPS_S, 1, 0xffffffff, 0, 1);
+	quad[1].set(0, 0, EPS_S, 1, 0xffffffff, 0, 0);
+	quad[2].set(w, h, EPS_S, 1, 0xffffffff, 1, 1);
+	quad[3].set(w, 0, EPS_S, 1, 0xffffffff, 1, 0);
+	RCache.Vertex.Unlock(4, g_combine->vb_stride);
+	u_setrt(rt_dlss_display_position, nullptr, nullptr, nullptr);
+	RCache.set_CullMode(CULL_NONE);
+	RCache.set_Stencil(FALSE);
+	RCache.set_ColorWriteEnable();
+	RCache.set_Geometry(g_combine);
+	RCache.set_Element(s_dlss_display_copy->E[0]);
+	RCache.set_c("dlss_display_copy_params", float(dlss::RenderWidth()) / w, float(dlss::RenderHeight()) / h,
+		jitterX, jitterY);
+	RCache.Render(D3DPT_TRIANGLELIST, offset, 0, 4, 0, 2);
 }
 
 void CRenderTarget::dlss_post_twin(ref_rt& scene, float divisor, int resample)
@@ -248,6 +273,14 @@ bool CRenderTarget::DlssPostAfterUpscale() const
 	return !dlss_post_twins.empty() && dlss::Active();
 }
 
+// Laser beams are held out of the scene whenever the frame is reconstructed:
+// with the post chain, or else over the finished frame like the scope lenses.
+bool CRenderTarget::DlssEffectsAfterUpscale() const
+{
+	return DlssPostAfterUpscale() ||
+		(dlss::Active() && s_dlss_display_copy._get() != nullptr && !RImplementation.o.dx10_msaa);
+}
+
 // Reconstruct the scene before sunshafts, fog scattering, motion blur, bloom,
 // DOF and the LUT. They then run at display resolution and stay out of the
 // upscaler's history, so they are no longer reprojected or smeared by it.
@@ -260,26 +293,7 @@ void CRenderTarget::dlss_post_upscale()
 	dlss_post_jitter.set(jitter.x, jitter.y);
 	ID3DTexture2D* color = rt_Generic_0->pSurface;
 	if (dlss_hdr_swapped)
-	{
-		// The finished scene, still in display values, to linear HDR at render size.
-		const float rw = float(rt_dlss_hdr_input->dwWidth), rh = float(rt_dlss_hdr_input->dwHeight);
-		u32 offset;
-		FVF::TL* quad = (FVF::TL*)RCache.Vertex.Lock(4, g_combine->vb_stride, offset);
-		quad[0].set(0, rh, EPS_S, 1, 0xffffffff, 0, 1);
-		quad[1].set(0, 0, EPS_S, 1, 0xffffffff, 0, 0);
-		quad[2].set(rw, rh, EPS_S, 1, 0xffffffff, 1, 1);
-		quad[3].set(rw, 0, EPS_S, 1, 0xffffffff, 1, 0);
-		RCache.Vertex.Unlock(4, g_combine->vb_stride);
-		u_setrt(rt_dlss_hdr_input, nullptr, nullptr, nullptr);
-		RImplementation.rmNormal();
-		RCache.set_CullMode(CULL_NONE);
-		RCache.set_Stencil(FALSE);
-		RCache.set_ColorWriteEnable();
-		RCache.set_Element(s_dlss_hdr->E[0]);
-		RCache.set_Geometry(g_combine);
-		RCache.Render(D3DPT_TRIANGLELIST, offset, 0, 4, 0, 2);
-		color = rt_dlss_hdr_input->pSurface;
-	}
+		color = dlss_hdr_encode(0);
 	dlss_post_output = dlss::Evaluate(color, rt_ssfx_motion_vectors->pSurface);
 	dlss::EndScene();
 	if (!reported_post_chain)
@@ -330,6 +344,11 @@ void CRenderTarget::dlss_post_upscale()
 		RCache.Render(D3DPT_TRIANGLELIST, offset, 0, 4, 0, 2);
 	}
 
+	dlss_post_swap();
+}
+
+void CRenderTarget::dlss_post_swap()
+{
 	for (DlssPostTwin& twin : dlss_post_twins)
 		(*twin.scene)->swap_storage(*twin.display);
 	dlss_post_swapped = true;
@@ -343,6 +362,28 @@ void CRenderTarget::dlss_post_restore()
 		(*twin.scene)->swap_storage(*twin.display);
 	dlss_post_swapped = false;
 	RCache.InvalidateTextures();
+}
+
+// The finished scene, still in display values, to linear HDR at render size.
+ID3DTexture2D* CRenderTarget::dlss_hdr_encode(u32 element)
+{
+	const float rw = float(rt_dlss_hdr_input->dwWidth), rh = float(rt_dlss_hdr_input->dwHeight);
+	u32 offset;
+	FVF::TL* quad = (FVF::TL*)RCache.Vertex.Lock(4, g_combine->vb_stride, offset);
+	quad[0].set(0, rh, EPS_S, 1, 0xffffffff, 0, 1);
+	quad[1].set(0, 0, EPS_S, 1, 0xffffffff, 0, 0);
+	quad[2].set(rw, rh, EPS_S, 1, 0xffffffff, 1, 1);
+	quad[3].set(rw, 0, EPS_S, 1, 0xffffffff, 1, 0);
+	RCache.Vertex.Unlock(4, g_combine->vb_stride);
+	u_setrt(rt_dlss_hdr_input, nullptr, nullptr, nullptr);
+	RImplementation.rmNormal();
+	RCache.set_CullMode(CULL_NONE);
+	RCache.set_Stencil(FALSE);
+	RCache.set_ColorWriteEnable();
+	RCache.set_Element(s_dlss_hdr->E[element]);
+	RCache.set_Geometry(g_combine);
+	RCache.Render(D3DPT_TRIANGLELIST, offset, 0, 4, 0, 2);
+	return rt_dlss_hdr_input->pSurface;
 }
 
 // Before the scene is combined: until reconstruction it is kept in floating point.
@@ -367,30 +408,57 @@ void CRenderTarget::dlss_hdr_restore()
 
 // Particles and laser beams held out of the scene, over the reconstructed frame.
 // Soft particles and laser dots read the display-size position copy; the depth
-// test uses the scene depth reprojected to display resolution.
-void CRenderTarget::dlss_post_effects()
+// test uses the scene depth reprojected to display resolution. With the post
+// chain before reconstruction there are no twins: the beams go over its result,
+// after the chain as the scope lenses do.
+void CRenderTarget::dlss_post_effects(float jitterX, float jitterY)
 {
 	const auto& graph = RImplementation.GMBase.RGraph;
 	if (graph.mapDlssEffects.empty() && graph.mapDlssHudEffects.empty()) return;
+	const bool withPostChain = dlss_post_swapped;
 	if (!reported_post_effects)
 	{
-		Msg("[Upscaler] Particles and laser beams drawn after reconstruction: native=%ux%u, scene=%ux%u",
-			Device.dwWidth, Device.dwHeight, dlss::RenderWidth(), dlss::RenderHeight());
+		Msg("[Upscaler] %s drawn after reconstruction%s: native=%ux%u, scene=%ux%u",
+			withPostChain && ps_r_upscaler_particles_after ? "Particles and laser beams" : "Laser beams",
+			withPostChain ? "" : ", after post-processing", Device.dwWidth, Device.dwHeight,
+			dlss::RenderWidth(), dlss::RenderHeight());
 		reported_post_effects = true;
 	}
 
-	phase_dlss_native_depth(dlss_post_jitter.x, dlss_post_jitter.y);
-	u_setrt(rt_Generic_0, nullptr, nullptr, HW.pBaseZB);
+	ID3DBaseTexture* position = nullptr;
+	if (!withPostChain)
+	{
+		dlss_display_position(jitterX, jitterY);
+		position = rt_Position->pTexture->surface_get();
+		rt_Position->pTexture->surface_set(rt_dlss_display_position->pSurface);
+		RCache.InvalidateTextures();
+	}
+
+	phase_dlss_native_depth(jitterX, jitterY);
+#ifdef XR_DX12_BRIDGE
+	// The beams again over black, for frame generation's HUD-less image.
+	if (fg_mask_begin())
+		RImplementation.GMBase.r_dsgraph_render_fg_mask(false);
+#endif
+	u_setrt(withPostChain ? rt_Generic_0 : rt_dlss_post_source, nullptr, nullptr, HW.pBaseZB);
 	RImplementation.rmNormal();
 	RCache.set_CullMode(CULL_CCW);
 	RCache.set_Stencil(FALSE);
 	RCache.set_ColorWriteEnable();
 	RImplementation.GMBase.r_dsgraph_render_dlss_effects();
+
+	if (position)
+	{
+		rt_Position->pTexture->surface_set(position);
+		_RELEASE(position);
+		RCache.InvalidateTextures();
+	}
 }
 
 bool CRenderTarget::DlssSunshaftMaskOverTime() const
 {
-	return dlss_post_swapped && s_dlss_sunshaft_mask._get() != nullptr && ps_r_upscaler_sunshaft_smooth;
+	return dlss_post_swapped && s_dlss_sunshaft_mask._get() != nullptr &&
+		ps_r_upscaler_sunshafts == UPSCALER_SUNSHAFTS_SMOOTHED;
 }
 
 // This frame's mask is in rt_sunshafts_1; the blurs read the result from rt_sunshafts_0.
@@ -414,19 +482,67 @@ void CRenderTarget::dlss_sunshaft_mask(u32 Offset)
 	dlss_sunshaft_history = next;
 }
 
+bool CRenderTarget::DlssVolumetricOverTime() const
+{
+	return dlss_post_swapped && dlss_volumetric_history_available && !RImplementation.o.dx10_msaa &&
+		ps_r_upscaler_sunshafts == UPSCALER_SUNSHAFTS_SMOOTHED;
+}
+
+// Blends this frame's volumetric lights into the display-size history, unjittered,
+// and puts the result in place of rt_Generic_2 for the combine. Returns the
+// surface to put back afterwards.
+ID3DBaseTexture* CRenderTarget::dlss_volumetric_over_time(float jitterX, float jitterY)
+{
+	dlss_volumetric_history_create();
+	// A gap in the frames means stale history. Scope views skip every other frame.
+	const bool restart = !dlss_volumetric_frame || Device.dwFrame - dlss_volumetric_frame > 2;
+	dlss_volumetric_frame = Device.dwFrame;
+	const u32 next = dlss_volumetric_history ^ 1;
+
+	const float w = float(Device.dwWidth), h = float(Device.dwHeight);
+	u32 offset;
+	FVF::TL* quad = (FVF::TL*)RCache.Vertex.Lock(4, g_combine->vb_stride, offset);
+	quad[0].set(0, h, EPS_S, 1, 0xffffffff, 0, 1);
+	quad[1].set(0, 0, EPS_S, 1, 0xffffffff, 0, 0);
+	quad[2].set(w, h, EPS_S, 1, 0xffffffff, 1, 1);
+	quad[3].set(w, 0, EPS_S, 1, 0xffffffff, 1, 0);
+	RCache.Vertex.Unlock(4, g_combine->vb_stride);
+	u_setrt(rt_dlss_volumetric_history[next], nullptr, nullptr, nullptr);
+	RCache.set_CullMode(CULL_NONE);
+	RCache.set_Stencil(FALSE);
+	RCache.set_ColorWriteEnable();
+	RCache.set_Geometry(g_combine);
+	RCache.set_Element(s_dlss_volumetric_history->E[dlss_volumetric_history]);
+	RCache.set_c("dlss_volumetric_history_params", restart ? 1.f : 0.1f,
+		jitterX / float(dlss::RenderWidth()), jitterY / float(dlss::RenderHeight()), 0.f);
+	RCache.set_c("m_current", Matrix_current);
+	RCache.set_c("m_previous", Matrix_previous);
+	RCache.Render(D3DPT_TRIANGLELIST, offset, 0, 4, 0, 2);
+	dlss_volumetric_history = next;
+
+	ID3DBaseTexture* raw = rt_Generic_2->pTexture->surface_get();
+	rt_Generic_2->pTexture->surface_set(rt_dlss_volumetric_history[next]->pSurface);
+	RCache.InvalidateTextures();
+	return raw;
+}
+
 void CRenderTarget::phase_dlss_postprocess()
 {
 	// With the post chain after reconstruction, the scene targets hold its display-size result.
 	const bool postAfterUpscale = dlss_post_swapped;
 	dlss::Offset sceneJitter{dlss_post_jitter.x, dlss_post_jitter.y};
 	bool dlssOutput = dlss_post_output;
+	// HDR input with the post chain before reconstruction: only its result is converted.
+	const bool hdrResolve = !postAfterUpscale && dlss::HdrInput() && dlss::Active();
+	// Before EndScene, which ends dlss::Active(): the scene held the beams back on this.
+	const bool effectsAfterPost = !postAfterUpscale && DlssEffectsAfterUpscale();
 	if (!postAfterUpscale)
 	{
 #ifdef XR_DX12_BRIDGE
 		fg::CaptureScene();
 #endif
 		sceneJitter = dlss::RasterJitter();
-		dlssOutput = dlss::Evaluate(rt_Color->pSurface, rt_ssfx_motion_vectors->pSurface);
+		dlssOutput = dlss::Evaluate(hdrResolve ? dlss_hdr_encode(2) : rt_Color->pSurface, rt_ssfx_motion_vectors->pSurface);
 		dlss::EndScene();
 	}
 	if (!dlss::Configured()) return;
@@ -456,17 +572,49 @@ void CRenderTarget::phase_dlss_postprocess()
 		!postAfterUpscale && dlssOutput ? (sharpen ? 2 : 0) : 1;
 	// The debug views read the render-size scene targets.
 	if (ps_r_upscaler_debug == 1 || ps_r_upscaler_debug == 2) dlss_post_restore();
-	RCache.set_Element(s_dlss_copy->E[element]);
-	if (element == 2) RCache.set_c("dlss_sharpening", ps_r_dlss_sharpness, 0.f, 0.f, 0.f);
+	if (hdrResolve && (element == 0 || element == 2))
+	{
+		// Undo the curve and return to display values; CAS is applied in HDR first.
+		RCache.set_Element(s_dlss_hdr->E[1]);
+		RCache.set_c("dlss_sharpening", sharpen ? ps_r_dlss_sharpness : 0.f, 0.f, 0.f, 0.f);
+	}
+	else
+	{
+		RCache.set_Element(s_dlss_copy->E[element]);
+		if (element == 2) RCache.set_c("dlss_sharpening", ps_r_dlss_sharpness, 0.f, 0.f, 0.f);
+	}
 	RCache.set_Geometry(g_combine);
 	RCache.Render(D3DPT_TRIANGLELIST, offset, 0, 4, 0, 2);
 	dlss_post_restore();
 	dlss_hdr_restore();
 
+	// Without the post chain after reconstruction, laser beams go over its result.
+	// Before the scope lenses, which magnify them with the rest of the frame.
+	if (effectsAfterPost)
+		dlss_post_effects(sceneJitter.x, sceneJitter.y);
+
 	// 3D scope lenses magnify the frame around them. In the scene the zoom also
 	// magnified the jitter and was reconstructed with the world's motion vectors.
 	if (scope_3D_fake_enabled && ScopeAfterUpscale() && !RImplementation.GMBase.RGraph.mapScopeHUDSorted.empty())
 		phase_dlss_scope(sceneJitter.x, sceneJitter.y);
+
+#ifdef XR_DX12_BRIDGE
+	// Reflex sight reticles drawn in the scene: again over black, at display
+	// resolution without jitter, for frame generation's HUD-less image.
+	if (!RImplementation.GMBase.RGraph.mapFgReticles.empty())
+	{
+		ID3DRenderTargetView* target = RCache.get_RT();
+		ID3DDepthStencilView* depth = RCache.get_ZB();
+		phase_dlss_native_depth(sceneJitter.x, sceneJitter.y);
+		if (fg_mask_begin())
+			RImplementation.GMBase.r_dsgraph_render_fg_reticles();
+		RImplementation.GMBase.RGraph.mapFgReticles.clear();
+		RCache.set_RT(target);
+		RCache.set_RT(nullptr, 1);
+		RCache.set_RT(nullptr, 2);
+		RCache.set_ZB(depth);
+	}
+#endif
 
 	// Lens flares are additive, depth-free sprites that cover the HUD. In the scene
 	// they would be reprojected with the hands' motion vectors and reconstructed as
@@ -499,9 +647,13 @@ void CRenderTarget::phase_dlss_postprocess()
 		phase_gasmask_dudv();
 		if (ps_r2_drops_control.x > 0) phase_gasmask_drops();
 	}
+	// These read the post chain's blur, which only its display-size twins hold.
+	const bool overlaysReadPost = postAfterUpscale && (ps_r2_nightvision > 0 || ps_r2_heatvision > 0 || scope_fake_enabled);
+	if (overlaysReadPost) dlss_post_swap();
 	if (ps_r2_nightvision > 0) phase_nightvision();
 	if (ps_r2_heatvision > 0) phase_heatvision();
 	if (scope_fake_enabled) phase_fakescope();
+	if (overlaysReadPost) dlss_post_restore();
 }
 
 void CRenderTarget::phase_pp()

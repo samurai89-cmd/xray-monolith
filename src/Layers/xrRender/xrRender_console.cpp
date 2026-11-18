@@ -20,8 +20,13 @@ xr_token fsr3_quality_token[] = {
 u32 ps_r_dlss_preset = 0;
 float ps_r_dlss_sharpness = 0.0f;
 int ps_r_upscaler_debug = 0;
-int ps_r_upscaler_post_after = 1;
-int ps_r_upscaler_sunshaft_smooth = 1;
+int ps_r_upscaler_post_after = 0;
+int ps_r_upscaler_particles_after = 0;
+u32 ps_r_upscaler_sunshafts = UPSCALER_SUNSHAFTS_SMOOTHED;
+xr_token upscaler_sunshafts_token[] = {
+    {"upscaled", UPSCALER_SUNSHAFTS_UPSCALED}, {"smoothed", UPSCALER_SUNSHAFTS_SMOOTHED},
+    {"raw", UPSCALER_SUNSHAFTS_RAW}, {nullptr, 0}
+};
 int ps_r_dlss_hdr_input = 1;
 xr_token dlss_preset_token[] = {
     {"default", 0}, {"j", 10}, {"k", 11}, {"l", 12}, {"m", 13}, {nullptr, 0}
@@ -141,7 +146,21 @@ xr_token screenshot_mode_token [ ] = {
 // Method switches between DLSS and FSR rebuild DX12 presentation on vid_restart.
 u32 ps_r_frame_generation = 0;
 int ps_r_fg_diagnostics = 0; // Latched at bridge creation.
-static xr_token frame_generation_token[] = {{"off",0},{"dlss",1},{"fsr",2},{nullptr,0}};
+// Developer test for frame generation afterimages: a centred square, this percent of the
+// screen height from centre to edge, is filled from its border in the HUD-less image
+// given to frame generation. The presented frame keeps it. 0 = off.
+int ps_r_fg_hudless_test = 0;
+// Laser beams and reflex sight reticles are filled from the pixels around them in
+// the HUD-less image, so frame generation does not interpolate them into
+// afterimages. r_fg_laser_fill_view presents that image, to check the fill.
+int ps_r_fg_laser_fill = 1;
+int ps_r_fg_laser_fill_view = 0;
+// The most generated frames DLSS-G last reported (1 = 2x only), 0 = never started.
+// Hides 3x/4x in sessions that start without DLSS-G; updated whenever it starts.
+int ps_r_fg_dlss_frames_max = 0;
+// dlss3x/dlss4x ask DLSS-G for 2/3 generated frames, clamped to what the runtime allows.
+// Their ids follow fsr so saved configs keep their meaning.
+static xr_token frame_generation_token[] = {{"off",0},{"dlss",1},{"dlss3x",3},{"dlss4x",4},{"fsr",2},{nullptr,0}};
 // DX12-only: AMD FSR through the bridge (FSR 4 on supported Radeon GPUs).
 static xr_token upscaler_token_dx12[] = {{"off", 0}, {"dlss", 1}, {"fsr3", 2}, {"fsr4", 3}, {nullptr, 0}};
 #endif
@@ -1669,18 +1688,26 @@ void xrRender_initconsole()
 #ifdef XR_DX12_BRIDGE
     CMD4(CCC_SupportedToken, "r_frame_generation", &ps_r_frame_generation, frame_generation_token, &dlss::FrameGenerationSupported);
     CMD4(CCC_Integer, "r_fg_diagnostics", &ps_r_fg_diagnostics, 0, 1);
+    CMD4(CCC_UnsavedInteger, "r_fg_hudless_test", &ps_r_fg_hudless_test, 0, 40);
+    CMD4(CCC_Integer, "r_fg_laser_fill", &ps_r_fg_laser_fill, 0, 1);
+    CMD4(CCC_UnsavedInteger, "r_fg_laser_fill_view", &ps_r_fg_laser_fill_view, 0, 1);
+    CMD4(CCC_Integer, "r_fg_dlss_frames_max", &ps_r_fg_dlss_frames_max, 0, 5);
 #endif
 	CMD3(CCC_Token, "r_fsr3_quality", &ps_r_fsr3_quality, fsr3_quality_token);
 	CMD3(CCC_Token, "r_dlss_preset", &ps_r_dlss_preset, dlss_preset_token);
 	CMD4(CCC_Float, "r_dlss_sharpness", &ps_r_dlss_sharpness, 0.0f, 1.0f);
-	// Post chain, volumetric lights, particles and laser beams after the upscaler; needs vid_restart
+	// Post chain, volumetric lights and particles after the upscaler; needs vid_restart.
+	// Laser beams are drawn after it either way.
 	CMD4(CCC_Integer, "r_upscaler_post_after", &ps_r_upscaler_post_after, 0, 1);
-	// Linear HDR input for DLSS, with a reversible curve around it; needs r_upscaler_post_after and vid_restart
+	// 1 = particles are drawn after the upscaler too, along with the rest of the post chain
+	CMD4(CCC_Integer, "r_upscaler_particles_after", &ps_r_upscaler_particles_after, 0, 1);
+	// Linear HDR input for DLSS, with a reversible curve around it; needs vid_restart
 	CMD4(CCC_Integer, "r_dlss_hdr_input", &ps_r_dlss_hdr_input, 0, 1);
 	// 1 = upscaler input (render resolution, stretched), 2 = motion vectors
 	CMD4(CCC_UnsavedInteger, "r_upscaler_debug", &ps_r_upscaler_debug, 0, 2);
-	// Smooth the screen-space sunshaft mask over time when the post chain runs after the upscaler
-	CMD4(CCC_Integer, "r_upscaler_sunshaft_smooth", &ps_r_upscaler_sunshaft_smooth, 0, 1);
+	// With the post chain after the upscaler: sunshafts before it (upscaled), or after it with the
+	// screen-space mask and the volumetric lights smoothed over time (smoothed) or not (raw).
+	CMD3(CCC_Token, "r_upscaler_sunshafts", &ps_r_upscaler_sunshafts, upscaler_sunshafts_token);
 #endif
 	CMD3(CCC_Mask,		"r2_gi",				&ps_r2_ls_flags,			R2FLAG_GI);
 	CMD4(CCC_Float,		"r2_gi_clip",			&ps_r2_GI_clip,				EPS,	0.1f	);

@@ -119,10 +119,11 @@ public:
     void Compile(CBlender_Compile& C) override
     {
         IBlender::Compile(C);
-        if (C.iElement > 1) return;
-        // 0: the finished scene to linear HDR; 1: the reconstruction back, with optional CAS
-        C.r_Pass("stub_screen_space", C.iElement == 0 ? "dlss_hdr_encode" : "dlss_hdr_decode", FALSE, FALSE, FALSE);
-        C.r_dx10Texture("s_image", C.iElement == 0 ? r2_RT_generic0 : "$user$dlss_output");
+        if (C.iElement > 2) return;
+        // 0: the finished scene to linear HDR; 1: the reconstruction back, with optional CAS;
+        // 2: as 0, when the post chain stays before reconstruction and ends in rt_Color
+        C.r_Pass("stub_screen_space", C.iElement == 1 ? "dlss_hdr_decode" : "dlss_hdr_encode", FALSE, FALSE, FALSE);
+        C.r_dx10Texture("s_image", C.iElement == 0 ? r2_RT_generic0 : C.iElement == 2 ? r2_RT_albedo : "$user$dlss_output");
         C.r_dx10Sampler("smp_nofilter");
         C.r_dx10Sampler("smp_rtlinear");
         C.r_End();
@@ -189,6 +190,117 @@ public:
         C.r_End();
     }
 };
+
+class CBlender_dlss_volumetric_history : public IBlender
+{
+public:
+    CBlender_dlss_volumetric_history() { description.CLS = 0; }
+    LPCSTR getComment() override { return "Volumetric lights over time"; }
+    BOOL canBeDetailed() override { return FALSE; }
+    BOOL canBeLMAPped() override { return FALSE; }
+    void Compile(CBlender_Compile& C) override
+    {
+        IBlender::Compile(C);
+        // One element per history target: each reads one and writes the other.
+        if (C.iElement > 1) return;
+        C.r_Pass("stub_screen_space", "dlss_volumetric_history", FALSE, FALSE, FALSE);
+        C.r_dx10Texture("s_current", r2_RT_generic2);
+        C.r_dx10Texture("s_history", C.iElement ? "$user$dlss_volumetric_history_1" : "$user$dlss_volumetric_history_0");
+        C.r_dx10Texture("s_position", r2_RT_P);
+        C.r_dx10Texture("s_motion_vectors", r2_RT_ssfx_motion_vectors);
+        C.r_dx10Sampler("smp_nofilter");
+        C.r_dx10Sampler("smp_rtlinear");
+        C.r_End();
+    }
+};
+
+class CBlender_fg_hudless_test : public IBlender
+{
+public:
+    CBlender_fg_hudless_test() { description.CLS = 0; }
+    LPCSTR getComment() override { return "Frame generation HUD-less test square"; }
+    BOOL canBeDetailed() override { return FALSE; }
+    BOOL canBeLMAPped() override { return FALSE; }
+    void Compile(CBlender_Compile& C) override
+    {
+        IBlender::Compile(C);
+        if (C.iElement != 0) return;
+        C.r_Pass("stub_screen_space", "dlss_fg_hudless_test", FALSE, FALSE, FALSE);
+        C.r_dx10Texture("s_image", "$user$fg_hudless_0");
+        C.r_End();
+    }
+};
+
+class CBlender_fg_laser_fill : public IBlender
+{
+public:
+    CBlender_fg_laser_fill() { description.CLS = 0; }
+    LPCSTR getComment() override { return "Frame generation HUD-less laser fill"; }
+    BOOL canBeDetailed() override { return FALSE; }
+    BOOL canBeLMAPped() override { return FALSE; }
+    void Compile(CBlender_Compile& C) override
+    {
+        IBlender::Compile(C);
+        if (C.iElement != 0) return;
+        C.r_Pass("stub_screen_space", "dlss_fg_laser_fill", FALSE, FALSE, FALSE);
+        C.r_dx10Texture("s_image", "$user$fg_hudless_0");
+        C.r_dx10Texture("s_mask", "$user$fg_mask");
+        C.r_End();
+    }
+};
+
+// In the presentation surface's format, recreated if it changes.
+bool CRenderTarget::fg_hudless_create(D3DFORMAT format)
+{
+	if (rt_fg_hudless[0] && rt_fg_hudless[0]->fmt == format) return true;
+	rt_fg_hudless[0].create("$user$fg_hudless_0", Device.dwWidth, Device.dwHeight, format);
+	rt_fg_hudless[1].create("$user$fg_hudless_1", Device.dwWidth, Device.dwHeight, format);
+	return rt_fg_hudless[0] && rt_fg_hudless[1];
+}
+
+bool CRenderTarget::fg_hudless_test_create()
+{
+	if (fg_hudless_test_state) return fg_hudless_test_state > 0;
+	string_path shader;
+	if (!FS.exist(shader, "$game_shaders$", "r3\\dlss_fg_hudless_test", ".ps"))
+	{
+		Msg("! [FG test] r_fg_hudless_test needs shaders\\r3\\dlss_fg_hudless_test.ps from the compatibility patch");
+		fg_hudless_test_state = -1;
+		return false;
+	}
+	CBlender_fg_hudless_test blender;
+	s_fg_hudless_test.create(&blender, "dlss_fg_hudless_test");
+	fg_hudless_test_state = 1;
+	return true;
+}
+
+// Also creates the display-size mask the beams and reticles are drawn into.
+bool CRenderTarget::fg_laser_fill_create()
+{
+	if (fg_laser_fill_state) return fg_laser_fill_state > 0;
+	string_path shader;
+	if (!FS.exist(shader, "$game_shaders$", "r3\\dlss_fg_laser_fill", ".ps"))
+	{
+		Msg("! [FG] r_fg_laser_fill needs shaders\\r3\\dlss_fg_laser_fill.ps from the compatibility patch");
+		fg_laser_fill_state = -1;
+		return false;
+	}
+	rt_fg_mask.create("$user$fg_mask", Device.dwWidth, Device.dwHeight, D3DFMT_A8R8G8B8);
+	CBlender_fg_laser_fill blender;
+	s_fg_laser_fill.create(&blender, "dlss_fg_laser_fill");
+	fg_laser_fill_state = 1;
+	return true;
+}
+
+void CRenderTarget::dlss_volumetric_history_create()
+{
+	if (s_dlss_volumetric_history) return;
+	rt_dlss_volumetric_history[0].create("$user$dlss_volumetric_history_0", Device.dwWidth, Device.dwHeight, D3DFMT_A16B16G16R16F);
+	rt_dlss_volumetric_history[1].create("$user$dlss_volumetric_history_1", Device.dwWidth, Device.dwHeight, D3DFMT_A16B16G16R16F);
+	CBlender_dlss_volumetric_history volumetricHistory;
+	s_dlss_volumetric_history.create(&volumetricHistory, "dlss_volumetric_history");
+	dlss_volumetric_frame = 0;
+}
 
 void CRenderTarget::set_viewport_size(ID3DDeviceContext * dev, float w, float h)
 {
@@ -1496,7 +1608,7 @@ CRenderTarget::CRenderTarget()
 		}
 		if (!ps_r_upscaler_post_after)
 		{
-			Msg("[Upscaler] r_upscaler_post_after is off: post-processing, volumetric lights, particles and laser beams stay before reconstruction");
+			Msg("[Upscaler] r_upscaler_post_after is off: post-processing, volumetric lights and particles stay before reconstruction");
 		}
 		else if (s_dlss_display_copy && !RImplementation.o.dx10_msaa)
 		{
@@ -1531,14 +1643,14 @@ CRenderTarget::CRenderTarget()
 				CBlender_dlss_sunshaft_mask sunshaftMask;
 				s_dlss_sunshaft_mask.create(&sunshaftMask, "dlss_sunshaft_mask");
 			}
+			string_path volumetricHistoryShader;
+			dlss_volumetric_history_available =
+				FS.exist(volumetricHistoryShader, "$game_shaders$", "r3\\dlss_volumetric_history", ".ps") != nullptr;
 			if (dlss::HdrInput())
 			{
-				CBlender_dlss_hdr hdr;
-				s_dlss_hdr.create(&hdr, "dlss_hdr");
-				rt_dlss_hdr_input.create("$user$dlss_hdr_input", rt_Generic_0->dwWidth, rt_Generic_0->dwHeight,
-					D3DFMT_A16B16G16R16F);
-				// The water/glass copy must match the scene's format to stay valid.
-				for (ref_rt* rt : {&rt_Generic_0, &rt_Generic_temp})
+				// The water/glass copy must match the scene's format to stay valid, and so
+				// must rt_Generic: sunshafts before the upscaler copy their blend back from it.
+				for (ref_rt* rt : {&rt_Generic_0, &rt_Generic_temp, &rt_Generic})
 				{
 					string64 name;
 					xr_sprintf(name, "$user$dlss_hdr_%u", u32(dlss_hdr_twins.size()));
@@ -1546,13 +1658,21 @@ CRenderTarget::CRenderTarget()
 					twin.display.create(name, (*rt)->dwWidth, (*rt)->dwHeight, D3DFMT_A16B16G16R16F);
 					dlss_hdr_twins.push_back(twin);
 				}
-				Msg("[Upscaler] DLSS HDR input: floating-point scene, linear with a reversible highlight curve");
 			}
 		}
 		else
 		{
 			Msg("! [Upscaler] %s: post-processing, volumetric lights and 3D scope lenses stay before reconstruction",
 				s_dlss_display_copy ? "MSAA is on" : "shaders\\r3\\dlss_display_copy.ps not found (outdated compatibility patch?)");
+		}
+		if (dlss::HdrInput())
+		{
+			CBlender_dlss_hdr hdr;
+			s_dlss_hdr.create(&hdr, "dlss_hdr");
+			rt_dlss_hdr_input.create("$user$dlss_hdr_input", rt_Generic_0->dwWidth, rt_Generic_0->dwHeight,
+				D3DFMT_A16B16G16R16F);
+			Msg("[Upscaler] DLSS HDR input: %s scene, linear with a reversible highlight curve",
+				dlss_hdr_twins.empty() ? "8-bit" : "floating-point");
 		}
 	}
 	g_postprocess.create(D3DFVF_XYZRHW | D3DFVF_DIFFUSE | D3DFVF_SPECULAR | D3DFVF_TEX3, RCache.Vertex.Buffer(),

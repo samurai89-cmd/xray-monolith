@@ -65,14 +65,43 @@ differs from RC7.6 only in comments, so Better Beef's + RC7.x reuses
 better_beefs_atmos_rc7. RC7.71 shaders read the engine's ssfx_timedelta
 (frame time, frame number in .y), which these binaries bind.
 
-GLOSSY PUDDLES OVERHAUL V2.3
+Atmospherics 2.69 RC8 has its own choice. Its deffer_impl_flat.ps ("In
+common") is byte-identical to RC7.71's, so the choice installs the same
+atmos_rc7 component. Its combine_2_naa.ps changed (sky-only debanding and a
+triangular dither from the new atmos_dither.h, which RC7.x lacks), so
+Better Beef's + RC8 installs better_beefs_atmos_rc8. RC8 replaces none of the
+base component's files. Its volumetric sun reads volume_range (set by the
+stock engine per sun cascade) and skips the near cascade; rain_apply_gloss.ps
+reads s_patched_normal, which the stock rain blender binds.
+
+RC8 hotfix 4 keeps the same deffer_impl_flat.ps (byte-identical) and adds no
+shader resources or constants. Its combine_2_naa.ps blends bloom with the new
+tonemap_add_sRGB (tonemap_sRGB.h, which also defines PBRN_WHITE) instead of
+blend_soft. better_beefs_atmos_rc8 now starts from hotfix 4's file and keeps
+blend_soft behind #ifndef PBRN_WHITE, so the one file serves RC8 before and
+after hotfix 4.
+
+GLOSSY PUDDLES OVERHAUL V2.5
 ----------------------------
-Source: Glossy Puddles Overhaul v2.3 - Erandis (local FOMOD). Glossy Puddles
+Source: Glossy Puddles Overhaul v2.5 - Erandis (local FOMOD). Glossy Puddles
 replaces deffer_impl_flat.ps without the motion-vector output, so flat ground
 loses temporal motion under DLSS / FSR. Its FOMOD ships two distinct versions
 of that file: "PBR Puddles" (PBR Shader Based Weathers, both the SSS 23.5 and
 SSS 24 / RC3 folders are identical) and "SSS Puddles" (SSS Based Weathers,
-likewise identical across SSS versions). Its folders keep the v2.2 names.
+likewise identical across SSS versions).
+
+v2.4's two deffer_impl_flat.ps files match v2.3's after newline
+normalization, so the patched files are unchanged. v2.4 fixes Atmospherics
+RC8: v2.3's pbr_brdf_terrain.h lacks g_terrain_nv, which RC8's lmodel.h
+writes, so v2.3 above RC8 fails to compile most RC8 lighting shaders with or
+without this patch. v2.4 declares it.
+
+v2.5 adds footstep ripples: erandis_puddle_ripples.script feeds eight shader
+bus lanes (bus_erandis_ring0-7) and both deffer_impl_flat.ps files include the
+new erandis_puddle_ripples.h and add three lines for them. The patched files
+now start from v2.5, so they need v2.5 installed (the header is v2.5's) and no
+longer drop the ripples on flat ground. v2.5's terrain shader keeps its
+motion vectors; its SSR change guards its own SKY_TINT_GAIN.
 
 glossy_puddles_pbr / glossy_puddles_sss deffer_impl_flat.ps:
   Add #include "screenspace_mvectors.h" and assign O.velocity before
@@ -81,10 +110,9 @@ glossy_puddles_pbr / glossy_puddles_sss deffer_impl_flat.ps:
   v2.3 changed only the PBR file: bus_erandis is now declared behind
   GP_BUS_ERANDIS_DECLARED, because its settings_screenspace_PUDDLES.h also
   declares it. Without that guard the PBR file fails to compile against
-  v2.3. The SSS file is unchanged from v2.2. Both patched files also work
-  with v2.2.
+  v2.3 and later. The SSS file is unchanged from v2.2.
 
-Every Atmospherics choice sets dlss_weather_family: pbr for RC7.x, sss
+Every Atmospherics choice sets dlss_weather_family: pbr for RC7.x and RC8, sss
 otherwise. With the checkbox on, a conditional install at priority 250 picks
 the matching file. Its other files (scripts, terrain shader, SSR header) keep
 motion vectors or touch nothing this patch overrides and are not included.
@@ -135,6 +163,14 @@ better_beefs_atmos_rc7/combine_2_naa.ps:
   around ssfx_lut_pp without removing Atmospherics clarity or final dithering.
   Only installed when BOTH RC7.x and Better Beef's are selected.
 
+better_beefs_atmos_rc8/combine_2_naa.ps:
+  Start with Atmospherics RC8 hotfix 4's "In common" file, newlines
+  normalized. Add the same Better Beef's LUT-mask condition around
+  ssfx_lut_pp, keeping RC8's debanding and dither. Its two tonemap_add_sRGB
+  bloom lines fall back to RC8's blend_soft when PBRN_WHITE is not defined
+  (RC8 before hotfix 4). Only installed when BOTH RC8 and Better Beef's are
+  selected.
+
 The original mod remains responsible for its generation shaders, settings
 and Lua scripts, including its FDDA Redone patch where applicable. Its
 03 - PATCH - [ SSS Weapons DOF ] must remain installed when that SSS module
@@ -167,6 +203,25 @@ updating this provenance and the stated compatibility versions deliberately.
 
 STATUS
 ------
+0.721: compatibility patch only, for the same 0.72 binaries. Glossy Puddles
+moves to v2.5 and Better Beef's + RC8 to RC8 hotfix 4 (with an RC8 fallback).
+Checked with fxc: the patch's own shaders compile and break none of the mods'
+shaders on RC8 hotfix 4 (both feature sets), hotfix 4 and original RC8 with
+Better Beef's, and Glossy Puddles v2.5 on hotfix 4 (PBR with both SSR choices),
+RC7.71, stock Atmospherics and SSS only. Not installed through MO2 or played.
+
+0.72: lmape.vs, dlss_volumetric_history.ps and the frame generation laser fill
+shaders join the base component, and Atmospherics RC8 gets its own choice. The
+patch's own shaders compile on SSS 23.5, stock Atmospherics, RC7.71 and RC8
+(with either feature set, or with Better Beef's), and break none of RC8's
+shaders. Glossy Puddles v2.4 compiles on all of these stacks (PBR with both
+SSR choices, SSS) and the patch breaks none of their shaders on top of it.
+This exact package was not installed through MO2.
+
+0.71: vert.vs joins the base component. The patch's own shaders compile on SSS 23.5,
+stock Atmospherics and RC7.71. This exact package was not installed through MO2,
+and the other installer choices were not exercised.
+
 0.7: the patch's own shaders compile on SSS 23.5, stock Atmospherics and RC7.71.
 The test build of this patch was installed through MO2 with the RC7.x choice and
 played; the other installer choices were not exercised.

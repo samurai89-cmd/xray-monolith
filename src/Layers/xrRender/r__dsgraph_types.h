@@ -268,9 +268,11 @@ namespace R_dsgraph
 		mapDSGraphItems<float, false> mapScopeHUD;
 		mapDSGraphItems<float, false> mapScopeCamAttached;
 		mapDSGraphItems<float, false> mapScopeCamAttachedSorted;
-		// Particles and laser beams drawn after the upscaler, with the post chain.
+		// Laser beams, and particles with the post chain, drawn after the upscaler.
 		mapDSGraphItems<float, true> mapDlssEffects;
 		mapDSGraphItems<float, true> mapDlssHudEffects;
+		// Reflex sight reticles drawn in the scene, copied for frame generation's mask.
+		mapDSGraphItems<float, true> mapFgReticles;
 #endif
 		template<bool free = true>
 		IC void clear_graph(RenderQueueArray& queue, u32 _priority)
@@ -367,6 +369,7 @@ namespace R_dsgraph
 				mapScopeCamAttachedSorted.clear_and_free();
 				mapHUDNativeUi.clear_and_free();
 				mapDlssHudEffects.clear_and_free();
+				mapFgReticles.clear_and_free();
 				mapScopeHUD.clear_and_free();
 				mapScopeHUDSorted.clear_and_free();
 #endif
@@ -397,6 +400,7 @@ namespace R_dsgraph
 				mapScopeCamAttachedSorted.clear();
 				mapHUDNativeUi.clear();
 				mapDlssHudEffects.clear();
+				mapFgReticles.clear();
 				mapScopeHUD.clear();
 				mapScopeHUDSorted.clear();
 #endif

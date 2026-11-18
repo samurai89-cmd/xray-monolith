@@ -1,6 +1,6 @@
 # Builds the dlss-mt branch: official X-Ray Monolith MT + brodrigz DLSS/FSR3 + DX12 frame generation.
-# Produces one downloadable artifact laid out like the official modded exes, plus the
-# DLSS GAMMA shader patch as a separate Mod Organizer mod.
+# Produces one downloadable artifact laid out like the official modded exes, plus
+# brodrigz's DLSS GAMMA compatibility patch as a Mod Organizer FOMOD installer.
 #
 # Runtime DLLs (nvngx_dlss.dll, bin/streamline, bin/D3D12, amd_fidelityfx_*_dx12.dll) are not
 # stored in git (see tools/dlss/DX12_BRIDGE.txt) and are not produced here.
@@ -80,11 +80,8 @@ jobs:
         start-process -filepath "./! compress_gamedata.cmd" -Wait
         rename-item -path gamedata.db0 -newname ${{ env.PACK_GAMEDATA_NAME }}
 
-    - name: Stage DLSS GAMMA patch
-      run: |
-        $mod = "./dlss_patch/Monolith DLSS GAMMA Patch"
-        new-item -path $mod -itemtype directory -force | out-null
-        copy-item -path "./extras/dlss_gamma/gamedata" -destination $mod -recurse -force
+    - name: Build DLSS GAMMA compatibility patch (FOMOD)
+      run: python tools/dlss/package_compatibility.py --output ./dlss_patch_build
 
     - name: Upload gamedata
       uses: actions/upload-artifact@v4.6.0
@@ -98,7 +95,7 @@ jobs:
       uses: actions/upload-artifact@v4.6.0
       with:
         name: dlss_patch
-        path: ./dlss_patch
+        path: ./dlss_patch_build/dlss-binaries-GAMMA-compatibility-patch-*.zip
         if-no-files-found: "error"
         retention-days: 7
 
@@ -120,7 +117,7 @@ jobs:
         new-item -path "$root/Anomaly/db/mods" -itemtype directory -force | out-null
         copy-item -path "./parts/*_exe/*.exe" -destination "$root/Anomaly/bin" -force
         copy-item -path "./parts/gamedata/${{ env.PACK_GAMEDATA_NAME }}" -destination "$root/Anomaly/db/mods" -force
-        copy-item -path "./parts/dlss_patch/*" -destination "$root" -recurse -force
+        copy-item -path "./parts/dlss_patch/*.zip" -destination "$root" -force
         get-childitem -path $root -recurse -file | select-object FullName, Length | format-table -autosize
 
     - name: Upload bundle
