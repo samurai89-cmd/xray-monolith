@@ -1,0 +1,132 @@
+# Builds the dlss-mt branch: official X-Ray Monolith MT + brodrigz DLSS/FSR3 + DX12 frame generation.
+# Produces one downloadable artifact laid out like the official modded exes, plus the
+# DLSS GAMMA shader patch as a separate Mod Organizer mod.
+#
+# Runtime DLLs (nvngx_dlss.dll, bin/streamline, bin/D3D12, amd_fidelityfx_*_dx12.dll) are not
+# stored in git (see tools/dlss/DX12_BRIDGE.txt) and are not produced here.
+
+name: Build DLSS-MT engine
+
+on:
+  push:
+    branches: [ "dlss-mt" ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dlss-mt-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  SOLUTION_FILE_PATH: src/engine-vs2022.sln
+  PACK_GAMEDATA_NAME: 00_modded_exes_gamedata.db0
+
+jobs:
+  build:
+    name: build ${{ matrix.buildconf }}
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        buildconf: ["DX11", "DX11-AVX", "DX12"]
+
+    steps:
+    - name: Configure Pagefile
+      uses: al-cheb/configure-pagefile-action@v1.3
+      with:
+        minimum-size: 8GB
+        maximum-size: 8GB
+        disk-root: "C:"
+
+    - name: Checkout repo
+      uses: actions/checkout@v4
+      with:
+        persist-credentials: false
+        submodules: recursive
+
+    - name: setup-msbuild
+      uses: microsoft/setup-msbuild@v1.3.1
+      with:
+        msbuild-architecture: "x64"
+
+    - name: Build ${{ matrix.buildconf }}
+      run: msbuild /p:Configuration=${{ matrix.buildconf }} ${{ env.SOLUTION_FILE_PATH }}
+
+    - name: Upload exe
+      uses: actions/upload-artifact@v4.6.0
+      with:
+        name: ${{ matrix.buildconf }}_exe
+        path: ./_build/_game/bin_dbg/*.exe
+        if-no-files-found: "error"
+        retention-days: 7
+
+  pack:
+    name: pack gamedata and DLSS patch
+    runs-on: windows-latest
+
+    steps:
+    - name: Checkout repo
+      uses: actions/checkout@v4
+      with:
+        persist-credentials: false
+
+    - name: Pack gamedata
+      run: |
+        new-item -path "./compressor/gamedata" -itemtype directory -force
+        copy-item -path "./gamedata/*" -destination "./compressor/gamedata" -recurse -force
+        cd ./compressor
+        start-process -filepath "./! compress_gamedata.cmd" -Wait
+        rename-item -path gamedata.db0 -newname ${{ env.PACK_GAMEDATA_NAME }}
+
+    - name: Stage DLSS GAMMA patch
+      run: |
+        $mod = "./dlss_patch/Monolith DLSS GAMMA Patch"
+        new-item -path $mod -itemtype directory -force | out-null
+        copy-item -path "./extras/dlss_gamma/gamedata" -destination $mod -recurse -force
+
+    - name: Upload gamedata
+      uses: actions/upload-artifact@v4.6.0
+      with:
+        name: gamedata
+        path: ./compressor/${{ env.PACK_GAMEDATA_NAME }}
+        if-no-files-found: "error"
+        retention-days: 7
+
+    - name: Upload DLSS patch
+      uses: actions/upload-artifact@v4.6.0
+      with:
+        name: dlss_patch
+        path: ./dlss_patch
+        if-no-files-found: "error"
+        retention-days: 7
+
+  bundle:
+    name: bundle download
+    needs: [build, pack]
+    runs-on: windows-latest
+
+    steps:
+    - name: Download all parts
+      uses: actions/download-artifact@v4
+      with:
+        path: ./parts
+
+    - name: Assemble
+      run: |
+        $root = "./out"
+        new-item -path "$root/Anomaly/bin" -itemtype directory -force | out-null
+        new-item -path "$root/Anomaly/db/mods" -itemtype directory -force | out-null
+        copy-item -path "./parts/*_exe/*.exe" -destination "$root/Anomaly/bin" -force
+        copy-item -path "./parts/gamedata/${{ env.PACK_GAMEDATA_NAME }}" -destination "$root/Anomaly/db/mods" -force
+        copy-item -path "./parts/dlss_patch/*" -destination "$root" -recurse -force
+        get-childitem -path $root -recurse -file | select-object FullName, Length | format-table -autosize
+
+    - name: Upload bundle
+      uses: actions/upload-artifact@v4.6.0
+      with:
+        name: Monolith-MT-DLSS-${{ github.sha }}
+        path: ./out
+        if-no-files-found: "error"
+        retention-days: 30
